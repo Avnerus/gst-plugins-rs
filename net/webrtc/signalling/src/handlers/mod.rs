@@ -260,11 +260,40 @@ impl Handler {
         Ok(())
     }
 
+    fn peer_by_name(&self, peer_id: &str) -> Option<&PeerStatus> {
+        for value in self.peers.values() {
+            if let Some(meta) = &value.meta {
+                if let Some(name) = &meta.get("name") {
+                    if name.as_str().unwrap() == peer_id {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+        None
+    }
     /// Start a session between two peers
     #[instrument(level = "debug", skip(self))]
     fn start_session(&mut self, producer_id: &str, consumer_id: &str) -> Result<(), Error> {
+        let mut resolved_producer_id = producer_id.to_string();
         self.peers.get(producer_id).map_or_else(
-            || Err(anyhow!("No producer with ID: '{producer_id}'")),
+            || {
+                self.peer_by_name(producer_id).map_or_else(
+                    || Err(anyhow!("No producer with ID: '{producer_id}'")),
+                    |peer| {
+                        if !peer.producing() {
+                            Err(anyhow!(
+                                "Peer with id {} is not registered as a producer",
+                                producer_id
+                            ))
+                        } else {
+                            info!("Found peer by name {}", peer.peer_id.as_ref().unwrap());
+                            resolved_producer_id = peer.peer_id.clone().unwrap();
+                            Ok(peer)
+                        }
+                    }
+                )
+            },
             |peer| {
                 if !peer.producing() {
                     Err(anyhow!(
@@ -287,7 +316,7 @@ impl Handler {
             Session {
                 id: session_id.clone(),
                 consumer: consumer_id.to_string(),
-                producer: producer_id.to_string(),
+                producer: resolved_producer_id.clone()
             },
         );
         self.consumer_sessions
@@ -295,25 +324,25 @@ impl Handler {
             .or_default()
             .insert(session_id.clone());
         self.producer_sessions
-            .entry(producer_id.to_string())
+            .entry(resolved_producer_id.clone())
             .or_default()
             .insert(session_id.clone());
         self.items.push_back((
             consumer_id.to_string(),
             p::OutgoingMessage::SessionStarted {
-                peer_id: producer_id.to_string(),
+                peer_id: resolved_producer_id.clone(),
                 session_id: session_id.clone(),
             },
         ));
         self.items.push_back((
-            producer_id.to_string(),
+            resolved_producer_id.clone(),
             p::OutgoingMessage::StartSession {
                 peer_id: consumer_id.to_string(),
                 session_id: session_id.clone(),
             },
         ));
 
-        info!(id = %session_id, producer_id = %producer_id, consumer_id = %consumer_id, "started a session");
+        info!(id = %session_id, producer_id = %resolved_producer_id, consumer_id = %consumer_id, "started a session");
 
         Ok(())
     }

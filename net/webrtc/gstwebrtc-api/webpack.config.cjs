@@ -13,9 +13,12 @@ const config = {
   target: ["web", "es2017"],
   mode: isDevServer ? "development" : "production",
   devtool: isDevServer ? "eval" : "source-map",
+  experiments: {
+        outputModule: true
+   },
 
-  entry: { "gstwebrtc-api": "./src/index.js" },
-  output: { filename: isDevServer ? "[name]-[contenthash].min.js" : `[name]-${packageVersion}.min.js` },
+  entry: { "gstwebrtc-api": "./src/gstwebrtc-api.js" },
+  output: { library: { type: 'module' } },
 
   devServer: {
     open: true,
